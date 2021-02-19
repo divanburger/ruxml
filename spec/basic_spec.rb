@@ -4,12 +4,13 @@ describe RUXML::Parser, type: :lib do
   it "parses a basic string" do
     subject { described_class.new }
 
-    success = subject.open_string("test", "<tag>text<!--test-comment--></tag>\n<sct/><gat>\n<inner>\n</inner></gat>")
+    success = subject.open_string("test", "<tag>text<!--test-comment--></tag>\n<sct/><gat>\n<ns:inner>\n</ns:inner></gat>")
     expect(success).to eq true
 
     node = subject.get_node
     expect(node.type).to eq :begin
     expect(node.text).to eq 'tag'
+    expect(node.namespace).to eq ""
     expect(node.self_closing).to eq false
     expect(node.column_start).to eq 1
     expect(node.line).to eq 1
@@ -29,6 +30,7 @@ describe RUXML::Parser, type: :lib do
     node = subject.get_node
     expect(node.type).to eq :end
     expect(node.text).to eq 'tag'
+    expect(node.namespace).to eq ""
     expect(node.column_start).to eq 29
     expect(node.line).to eq 1
 
@@ -41,6 +43,7 @@ describe RUXML::Parser, type: :lib do
     node = subject.get_node
     expect(node.type).to eq :begin
     expect(node.text).to eq "sct"
+    expect(node.namespace).to eq ""
     expect(node.self_closing).to eq true
     expect(node.column_start).to eq 1
     expect(node.line).to eq 2
@@ -48,6 +51,7 @@ describe RUXML::Parser, type: :lib do
     node = subject.get_node
     expect(node.type).to eq :begin
     expect(node.text).to eq "gat"
+    expect(node.namespace).to eq ""
     expect(node.self_closing).to eq false
     expect(node.column_start).to eq 7
     expect(node.line).to eq 2
@@ -61,6 +65,7 @@ describe RUXML::Parser, type: :lib do
     node = subject.get_node
     expect(node.type).to eq :begin
     expect(node.text).to eq "inner"
+    expect(node.namespace).to eq "ns"
     expect(node.self_closing).to eq false
     expect(node.column_start).to eq 1
     expect(node.line).to eq 3
@@ -68,19 +73,21 @@ describe RUXML::Parser, type: :lib do
     node = subject.get_node
     expect(node.type).to eq :text
     expect(node.text).to eq "\n"
-    expect(node.column_start).to eq 8
+    expect(node.column_start).to eq 11
     expect(node.line).to eq 3
 
     node = subject.get_node
     expect(node.type).to eq :end
     expect(node.text).to eq "inner"
+    expect(node.namespace).to eq "ns"
     expect(node.column_start).to eq 1
     expect(node.line).to eq 4
 
     node = subject.get_node
     expect(node.type).to eq :end
     expect(node.text).to eq "gat"
-    expect(node.column_start).to eq 9
+    expect(node.namespace).to eq ""
+    expect(node.column_start).to eq 12
     expect(node.line).to eq 4
 
     node = subject.get_node

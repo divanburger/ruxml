@@ -68,9 +68,19 @@ static VALUE Node_offset(VALUE self) {
   return INT2NUM(node->offset);
 }
 
+static VALUE Node_namespace(VALUE self) {
+  auto node = Node_instance(self);
+  return rbstr_from_str(node->xml_namespace);
+}
+
 static VALUE Node_text(VALUE self) {
   auto node = Node_instance(self);
   return rbstr_from_str(node->text);
+}
+
+static VALUE Node_attribute_count(VALUE self) {
+  auto node = Node_instance(self);
+  return INT2NUM(node->attribute_count);
 }
 
 static VALUE Node_type(VALUE self) {
@@ -213,9 +223,19 @@ static VALUE Parser_node_offset(VALUE self) {
   return INT2NUM(parser->node.offset);
 }
 
+static VALUE Parser_node_namespace(VALUE self) {
+  auto parser = Parser_instance(self);
+  return rbstr_from_str(parser->node.xml_namespace);
+}
+
 static VALUE Parser_node_text(VALUE self) {
   auto parser = Parser_instance(self);
   return rbstr_from_str(parser->node.text);
+}
+
+static VALUE Parser_node_attribute_count(VALUE self) {
+  auto parser = Parser_instance(self);
+  return INT2NUM(parser->node.attribute_count);
 }
 
 static VALUE Parser_node_type(VALUE self) {
@@ -248,7 +268,9 @@ void Init_ruxml() {
   rb_define_method(ruxmlNode, "column_start", reinterpret_cast<VALUE (*)(...)>(Node_column_start), 0);
   rb_define_method(ruxmlNode, "line", reinterpret_cast<VALUE (*)(...)>(Node_line), 0);
   rb_define_method(ruxmlNode, "offset", reinterpret_cast<VALUE (*)(...)>(Node_offset), 0);
+  rb_define_method(ruxmlNode, "namespace", reinterpret_cast<VALUE (*)(...)>(Node_namespace), 0);
   rb_define_method(ruxmlNode, "text", reinterpret_cast<VALUE (*)(...)>(Node_text), 0);
+  rb_define_method(ruxmlNode, "attribute_count", reinterpret_cast<VALUE (*)(...)>(Node_attribute_count), 0);
   rb_define_method(ruxmlNode, "type", reinterpret_cast<VALUE (*)(...)>(Node_type), 0);
   rb_define_method(ruxmlNode, "self_closing", reinterpret_cast<VALUE (*)(...)>(Node_self_closing), 0);
 
@@ -265,7 +287,9 @@ void Init_ruxml() {
   rb_define_method(ruxmlParser, "node_column_start", reinterpret_cast<VALUE (*)(...)>(Parser_node_column_start), 0);
   rb_define_method(ruxmlParser, "node_line", reinterpret_cast<VALUE (*)(...)>(Parser_node_line), 0);
   rb_define_method(ruxmlParser, "node_offset", reinterpret_cast<VALUE (*)(...)>(Parser_node_offset), 0);
+  rb_define_method(ruxmlParser, "node_namespace", reinterpret_cast<VALUE (*)(...)>(Parser_node_namespace), 0);
   rb_define_method(ruxmlParser, "node_text", reinterpret_cast<VALUE (*)(...)>(Parser_node_text), 0);
+  rb_define_method(ruxmlParser, "node_attribute_count", reinterpret_cast<VALUE (*)(...)>(Parser_node_attribute_count), 0);
   rb_define_method(ruxmlParser, "node_type", reinterpret_cast<VALUE (*)(...)>(Parser_node_type), 0);
   rb_define_method(ruxmlParser, "node_self_closing", reinterpret_cast<VALUE (*)(...)>(Parser_node_self_closing), 0);
 }
