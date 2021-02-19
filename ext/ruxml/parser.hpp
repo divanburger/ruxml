@@ -81,8 +81,22 @@ struct Node {
   int64_t offset;
   int64_t depth;
 
+  int attribute_count;
   bool self_closing;
+  String xml_namespace;
   String text;
+};
+
+struct Attribute {
+  String xml_namespace;
+  String name;
+  String value;
+};
+
+struct AttributeBlock {
+  int count;
+  Attribute attributes[32];
+  AttributeBlock* next;
 };
 
 struct Parser {
@@ -105,8 +119,14 @@ struct Parser {
 
   uint8_t identifier_map[256];
 
+  bool has_next_token;
+  Token next_token;
   Token token;
   Node node;
+
+  AttributeBlock attribute_block;
+  uint64_t current_attribute_index;
+  AttributeBlock* current_attribute_block;
 
   int64_t depth;
 };
@@ -120,21 +140,30 @@ void print_error_start(Parser *parser, Token token);
 bool expect_type(Parser *parser, TokenType type);
 
 Token read_token(Parser *parser); // Internal only: use get_token instead
-Node read_node(Parser *parser); // Internal only: use get_node instead
+Node get_node(Parser *parser);
+Attribute get_attribute(Parser* parser);
 
-inline Token peek_token(Parser *parser) { return parser->token; }
-
-inline Token get_token(Parser *parser) {
-  parser->token = read_token(parser);
-  if (!parser->token.type) parser->done = true;
-  return parser->token;
+inline Token peek_token(Parser *parser) {
+  if (parser->has_next_token) return parser->next_token;
+  parser->next_token = read_token(parser);
+  parser->has_next_token = true;
+  return parser->next_token;
 }
 
-inline Node get_node(Parser *parser) {
-  parser->node = read_node(parser);
-  return parser->node;
+inline Token get_token(Parser *parser) {
+  if (parser->has_next_token) {
+    parser->token = parser->next_token;
+    parser->has_next_token = false;
+  } else {
+    parser->token = read_token(parser);
+  }
+
+  if (!parser->token.type) parser->done = true;
+  return parser->token;
 }
 
 void print_token(Token token);
 
 void print_node(Node node);
+void print_attribute(Attribute attr);
+void print_current_node(Parser *parser);

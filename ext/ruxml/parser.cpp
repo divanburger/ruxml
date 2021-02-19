@@ -7,6 +7,7 @@
 void parser_init(Parser *parser) {
   parser->line = 1;
   parser->col = 1;
+  parser->current_attribute_block = &parser->attribute_block;
 
   for (int i = 0; i < 128; i++) parser->tag_initial_map[i] = LA_INVALID;
   for (int i = 128; i < 256; i++) parser->tag_initial_map[i] = LA_IDENTIFIER; // UTF-8 characters are allowed
@@ -87,6 +88,13 @@ void parser_destroy(Parser *parser) {
   if (parser->source_type == PST_MMAP) {
     munmap(parser->buffer, parser->length);
   }
+
+  auto block = parser->attribute_block.next;
+  while (block) {
+    auto next = block->next;
+    raw_free(block);
+    block = next;
+  }
 }
 
 inline bool scan_value(Parser *parser, Token *token) {
@@ -98,8 +106,8 @@ inline bool scan_value(Parser *parser, Token *token) {
 
   int64_t length = end - start;
   token->type = TOK_VALUE;
-  token->text.length = length;
-  token->text.data = start;
+  token->text.length = length - 2;
+  token->text.data = start + 1;
 
   parser->col += length;
   parser->ptr = end;
@@ -347,7 +355,7 @@ void print_token(Token token) {
 }
 
 Node parse_xml_header(Parser *parser) {
-  auto start_token = peek_token(parser);
+  auto start_token = get_token(parser);
   auto token = get_token(parser);
   if (!expect_type(parser, TOK_IDENTIFIER)) return {};
 
@@ -369,8 +377,18 @@ Node parse_xml_header(Parser *parser) {
   return node;
 }
 
+Attribute* get_next_attribute_slot(Parser *parser) {
+  auto cur = parser->current_attribute_block;
+  if (cur->count + 1 == array_size(cur->attributes)) {
+    if (!cur->next) cur->next = raw_allocate_type(AttributeBlock);
+    parser->current_attribute_block = cur = cur->next;
+    cur->count = 0;
+  }
+  return &cur->attributes[cur->count++];
+}
+
 Node parse_element_begin(Parser *parser) {
-  auto start_token = peek_token(parser);
+  auto start_token = get_token(parser);
   auto token = get_token(parser);
   if (!expect_type(parser, TOK_IDENTIFIER)) return {};
 
@@ -380,7 +398,20 @@ Node parse_element_begin(Parser *parser) {
   node.c0 = start_token.c0;
   node.offset = token.offset;
   node.depth = parser->depth;
-  node.text = token.text;
+
+  auto colon_token = peek_token(parser);
+  if (colon_token.type == TOK_COLON) {
+    get_token(parser);
+    auto second_ident_token = get_token(parser);
+    if (!expect_type(parser, TOK_IDENTIFIER)) return {};
+    node.xml_namespace = token.text;
+    node.text = second_ident_token.text;
+  } else {
+    node.text = token.text;
+  }
+
+  parser->current_attribute_block = &parser->attribute_block;
+  parser->current_attribute_index = 0;
 
   while (!parser->done) {
     token = get_token(parser);
@@ -389,6 +420,30 @@ Node parse_element_begin(Parser *parser) {
       break;
     }
     if (token.type == TOK_R_ANGLED) break;
+
+    auto attribute = get_next_attribute_slot(parser);
+
+    if (!expect_type(parser, TOK_IDENTIFIER)) return {};
+    colon_token = peek_token(parser);
+    if (colon_token.type == TOK_COLON) {
+      get_token(parser);
+      auto second_ident_token = get_token(parser);
+      if (!expect_type(parser, TOK_IDENTIFIER)) return {};
+      attribute->xml_namespace = token.text;
+      attribute->name = second_ident_token.text;
+    } else {
+      attribute->xml_namespace = String{};
+      attribute->name = token.text;
+    }
+
+    get_token(parser);
+    if (!expect_type(parser, TOK_EQUALS)) return {};
+
+    auto value_token = get_token(parser);
+    if (!expect_type(parser, TOK_VALUE)) return {};
+    attribute->value = value_token.text;
+
+    node.attribute_count++;
   }
 
   node.c1 = token.c1;
@@ -398,7 +453,7 @@ Node parse_element_begin(Parser *parser) {
 }
 
 Node parse_element_end(Parser *parser) {
-  auto start_token = peek_token(parser);
+  auto start_token = get_token(parser);
   auto token = get_token(parser);
   if (!expect_type(parser, TOK_IDENTIFIER)) return {};
 
@@ -408,7 +463,17 @@ Node parse_element_end(Parser *parser) {
   node.c0 = start_token.c0;
   node.offset = start_token.offset;
   node.depth = parser->depth - 1;
-  node.text = token.text;
+
+  auto next = peek_token(parser);
+  if (next.type == TOK_COLON) {
+    get_token(parser);
+    auto second_ident_token = get_token(parser);
+    if (!expect_type(parser, TOK_IDENTIFIER)) return {};
+    node.xml_namespace = token.text;
+    node.text = second_ident_token.text;
+  } else {
+    node.text = token.text;
+  }
 
   while (!parser->done) {
     token = get_token(parser);
@@ -422,9 +487,9 @@ Node parse_element_end(Parser *parser) {
 }
 
 Node parse_text(Parser *parser) {
+  auto token = get_token(parser);
   if (!expect_type(parser, TOK_TEXT)) return {};
 
-  auto token = peek_token(parser);
   Node node = {};
   node.type = NODE_TEXT;
   node.line = token.line;
@@ -437,7 +502,7 @@ Node parse_text(Parser *parser) {
 }
 
 Node parse_comment(Parser *parser) {
-  auto start_token = peek_token(parser);
+  auto start_token = get_token(parser);
   Node node = {};
   node.line = start_token.line;
   node.c0 = start_token.c0;
@@ -455,36 +520,78 @@ Node parse_comment(Parser *parser) {
   return node;
 }
 
-Node read_node(Parser *parser) {
+Node get_node(Parser *parser) {
   if (parser->done || parser->errored) return {};
 
-  auto token = get_token(parser);
+  auto token = peek_token(parser);
   if (token.type == TOK_TAG_XML_START) {
-    return parse_xml_header(parser);
+    parser->node = parse_xml_header(parser);
   } else if (token.type == TOK_TAG_START_CLOSE) {
-    return parse_element_end(parser);
+    parser->node = parse_element_end(parser);
   } else if (token.type == TOK_L_ANGLED) {
-    return parse_element_begin(parser);
+    parser->node = parse_element_begin(parser);
   } else if (token.type == TOK_COMMENT_START) {
-    return parse_comment(parser);
+    parser->node = parse_comment(parser);
   } else if (token.type == TOK_INVALID) {
-    return {};
+    parser->node = {};
+    get_token(parser);
   } else {
-    return parse_text(parser);
+    parser->node = parse_text(parser);
   }
+
+  return parser->node;
+}
+
+Attribute get_attribute(Parser* parser) {
+  auto cur_block = parser->current_attribute_block;
+  if (parser->current_attribute_index == cur_block->count) {
+    if (cur_block->count < array_size(cur_block->attributes)) return {};
+    parser->current_attribute_block = cur_block = cur_block->next;
+    parser->current_attribute_index = 0;
+  }
+  assert(cur_block);
+  return cur_block->attributes[parser->current_attribute_index++];
 }
 
 void print_node(Node node) {
-  printf("%li:%li: [%li] ", node.line, node.c0, node.depth);
+  printf("%5li:%3li: [%li] ", node.line, node.c0, node.depth);
   if (node.type == NODE_ELEMENT_BEGIN) {
-    printf("Begin: '%.*s' %s\n", str_prt(node.text), node.self_closing ? "self-closing" : "");
+    if (str_empty(node.xml_namespace)) {
+      printf("Begin: %.*s", str_prt(node.text));
+    } else {
+      printf("Begin: %.*s:%.*s", str_prt(node.xml_namespace), str_prt(node.text));
+    }
+    if (node.self_closing) printf(" self-closing");
+    if (node.attribute_count) printf(" attrs=%i", node.attribute_count);
+    printf("\n");
   } else if (node.type == NODE_ELEMENT_END) {
-    printf("End: '%.*s'\n", str_prt(node.text));
+    if (str_empty(node.xml_namespace)) {
+      printf("End: %.*s\n", str_prt(node.text));
+    } else {
+      printf("End: %.*s:%.*s\n", str_prt(node.xml_namespace), str_prt(node.text));
+    }
   } else if (node.type == NODE_TEXT) {
-    printf("Text: '%.*s'\n", str_prt(node.text));
+    printf("Text: \"%.*s\"\n", str_prt(node.text));
   } else if (node.type == NODE_COMMENT) {
-    printf("Comment: '%.*s'\n", str_prt(node.text));
+    printf("Comment: \"%.*s\"\n", str_prt(node.text));
   } else if (node.type == NODE_XML_HEADER) {
     printf("XML header\n");
+  }
+}
+
+void print_attribute(Attribute attr) {
+  if (str_empty(attr.xml_namespace)) {
+    printf("               ~ %.*s", str_prt(attr.name));
+  } else {
+    printf("               ~ %.*s:%.*s", str_prt(attr.xml_namespace), str_prt(attr.name));
+  }
+  printf(" = \"%.*s\"\n", str_prt(attr.value));
+}
+
+void print_current_node(Parser *parser) {
+  print_node(parser->node);
+  for (int i = 0; i < parser->node.attribute_count; i++) {
+    auto attribute = get_attribute(parser);
+    print_attribute(attribute);
   }
 }
